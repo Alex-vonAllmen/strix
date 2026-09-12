@@ -61,12 +61,12 @@ jobs:
       - name: Install environment (frozen)
         run: uv sync --frozen
 
-      # Offline-safe by convention: the suite must pass in a bare environment
-      # with only declared deps. Heavyweight/network tests are expected to
-      # mock or pytest.importorskip, per the team's test discipline.
+      # pytest-cov is injected via --with because upstream's dev dependency
+      # group does not carry it; --with resolves it alongside the frozen env
+      # without touching uv.lock (keeps `uv sync --frozen` honest for devs).
       - name: Run tests with coverage
         run: |
-          uv run pytest tests/ \
+          uv run --with pytest-cov pytest tests/ \
             --junitxml=junit.xml \
             --cov=strix \
             --cov-report=xml:coverage.xml \
