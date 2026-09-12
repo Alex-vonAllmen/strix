@@ -1,0 +1,97 @@
+name: CI
+
+# PR-only suite (stealth-mode precedent: pushing to main re-proves a tree the
+# PR already proved green; the release workflow owns the main-side build).
+# Guarding main happens the same way it does there: every check runs on the PR
+# before merge, and branch protection marks the two named checks required.
+#
+# Load-bearing names (do not rename):
+# - the workflow FILE is .github/workflows/ci.yml — the dev-team orchestrator
+#   keys QA dispatch on this path (workflow_run event), never on `name:`.
+# - the two job names "Lint & Format" and "Tests & Coverage" are what the QA
+#   agent reads in its prompt and its verdict maps back to.
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint-format:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@3259c6206f993105e3a61b142c2d97bf4b9ef83d # v7.1.0
+        with:
+          enable-cache: true
+
+      # Dev tooling (ruff) comes from the lockfile's dependency-groups, so CI
+      # runs the same pinned ruff a developer gets from `uv sync`. Not uvx —
+      # uvx would float to latest and CI would disagree with local.
+      - name: Install environment (frozen)
+        run: uv sync --frozen
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+  tests-coverage:
+    name: Tests & Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@3259c6206f993105e3a61b142c2d97bf4b9ef83d # v7.1.0
+        with:
+          enable-cache: true
+
+      - name: Install environment (frozen)
+        run: uv sync --frozen
+
+      # Offline-safe by convention: the suite must pass in a bare environment
+      # with only declared deps. Heavyweight/network tests are expected to
+      # mock or pytest.importorskip, per the team's test discipline.
+      - name: Run tests with coverage
+        run: |
+          uv run pytest tests/ \
+            --junitxml=junit.xml \
+            --cov=strix \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          if [ -f coverage.xml ]; then
+            line=$(python3 -c "
+              import xml.etree.ElementTree as ET
+              root = ET.parse('coverage.xml').getroot()
+              print(f\"coverage: {float(root.get('line-rate', 0)) * 100:.1f}%\")")
+            echo "$line" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # if: always() — QA reads the junit/coverage artifacts on failures too;
+      # a red run without its artifacts is a needs-context, not a verdict.
+      - name: Upload verification artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verification-artifacts
+          path: |
+            junit.xml
+            coverage.xml
+          if-no-files-found: ignore
+          retention-days: 14
