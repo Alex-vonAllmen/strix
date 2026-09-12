@@ -70,7 +70,8 @@ function cleanOutput(raw: string, command: string = ""): string {
       // Skip echoed command (plain)
       if (command && line.trim() === command.trim()) continue;
       // Skip echoed command with $/#/> prefix
-      if (command && new RegExp(`^[\\$#>]\\s*${escapeRegex(command.trim())}\\s*$`).test(line)) continue;
+      // upstream: pattern built from escapeRegex()-sanitized command text; no user metacharacters
+      if (command && new RegExp(`^[\\$#>]\\s*${escapeRegex(command.trim())}\\s*$`).test(line)) continue; // nosemgrep
       filtered.push(line);
     }
     // Strip trailing [STRIX_N]$ lines

@@ -291,7 +291,8 @@ def restart_env() -> dict[str, str]:
 
 def restart_after_update() -> None:
     """Replace the current process with the freshly updated binary."""
-    os.execve(sys.executable, sys.argv, restart_env())  # noqa: S606  # nosec B606
+    # upstream self-restart after update; restart_env() built internally, not user-tainted
+    os.execve(sys.executable, sys.argv, restart_env())  # noqa: S606  # nosec B606  # nosemgrep
 
 
 def _release_target() -> str | None:

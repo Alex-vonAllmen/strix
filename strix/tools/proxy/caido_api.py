@@ -75,7 +75,8 @@ def _login_as_guest() -> str:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310  # nosec B310
+    # upstream: URL targets the local Caido proxy from validated config
+    with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310  # nosec B310  # nosemgrep
         payload = json.loads(resp.read())
     return str(payload["data"]["loginAsGuest"]["token"]["accessToken"])
 

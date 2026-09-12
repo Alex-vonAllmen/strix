@@ -34,7 +34,8 @@ _thread: threading.Thread | None = None
 def _warm(modules: tuple[str, ...]) -> None:
     for name in modules:
         try:
-            importlib.import_module(name)
+            # upstream: warm-up list is a static allowlist of first-party modules
+            importlib.import_module(name)  # nosemgrep
         except Exception:  # noqa: BLE001 - a failed warm-up must never fail the run.
             logger.debug("Import warm-up for %r failed", name, exc_info=True)
 

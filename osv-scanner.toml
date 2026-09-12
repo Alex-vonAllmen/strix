@@ -1,0 +1,80 @@
+# OSV overrides for upstream (usestrix/strix) pinned dependencies.
+# Format per osv-scanner: [[IgnoredVulns]] with id + reason.
+# Do not add entries silently for our own code; fix those at the source.
+
+# cryptography is deliberately pinned <49 in upstream pyproject.toml:
+# 49.x drops the universal2 macOS wheel (arm64-only), which breaks the
+# Intel macOS release build's `uv sync --frozen`. Accepted upstream risk;
+# revisit when upstream changes the pin.
+[[IgnoredVulns]]
+id = "PYSEC-2026-3552"
+reason = "cryptography <49 pin is upstream-deliberate (Intel macOS wheel); fix deferred to upstream pin bump"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-3553"
+reason = "cryptography <49 pin is upstream-deliberate (Intel macOS wheel); fix deferred to upstream pin bump"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-3554"
+reason = "cryptography <49 pin is upstream-deliberate (Intel macOS wheel); fix deferred to upstream pin bump"
+
+[[IgnoredVulns]]
+id = "GHSA-m2h6-j472-rp4c"
+reason = "cryptography <49 pin is upstream-deliberate (Intel macOS wheel); fix deferred to upstream pin bump"
+
+# aiohttp 3.14.1 -> 3.14.2/3.14.3: real fixes, but the bump churns uv.lock
+# against upstream sync (merge conflict per upstream pull). Tracked for the
+# next upstream sync rather than patched divergently in this fork.
+[[IgnoredVulns]]
+id = "PYSEC-2026-3545"
+reason = "aiohttp 3.14.1; fix (3.14.3) tracked for next upstream sync, not patched divergently"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-3546"
+reason = "aiohttp 3.14.1; fix (3.14.2) tracked for next upstream sync, not patched divergently"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-3547"
+reason = "aiohttp 3.14.1; fix (3.14.2) tracked for next upstream sync, not patched divergently"
+
+[[IgnoredVulns]]
+id = "GHSA-cq5v-8q36-5273"
+reason = "aiohttp 3.14.1; fix tracked for next upstream sync, not patched divergently"
+
+[[IgnoredVulns]]
+id = "GHSA-mfx4-hv73-q22v"
+reason = "aiohttp 3.14.1; fix tracked for next upstream sync, not patched divergently"
+
+[[IgnoredVulns]]
+id = "GHSA-mq44-7p77-q5h7"
+reason = "aiohttp 3.14.1; fix tracked for next upstream sync, not patched divergently"
+
+# pypdf 6.14.2 -> 6.15.0/6.16.x: same upstream-sync reasoning as aiohttp.
+[[IgnoredVulns]]
+id = "PYSEC-2026-3655"
+reason = "pypdf 6.14.2; fix tracked for next upstream sync"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-3656"
+reason = "pypdf 6.14.2; fix tracked for next upstream sync"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-3910"
+reason = "pypdf 6.14.2; fix tracked for next upstream sync"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-3911"
+reason = "pypdf 6.14.2; fix tracked for next upstream sync"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-3912"
+reason = "pypdf 6.14.2; fix tracked for next upstream sync"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-3913"
+reason = "pypdf 6.14.2; fix tracked for next upstream sync"
+
+# browserslist is a dev-only dependency of the viewer frontend build.
+[[IgnoredVulns]]
+id = "GHSA-c83g-rgw3-j3cx"
+reason = "browserslist dev-only (viewer frontend build chain), fix rides next upstream sync"

@@ -85,7 +85,8 @@ def render_system_prompt(
     try:
         prompt_dir = get_strix_resource_path("agents", _PROMPT_DIRNAME)
         loader_dirs = [prompt_dir, *skill_search_dirs()]
-        env = Environment(
+        # upstream: prompts are authored markdown; autoescape configured via select_autoescape below
+        env = Environment(  # nosemgrep
             loader=FileSystemLoader(loader_dirs),
             autoescape=select_autoescape(
                 enabled_extensions=(),
