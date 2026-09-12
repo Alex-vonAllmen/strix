@@ -50,6 +50,10 @@ dependencies = [
   # the Intel macOS (macos-x86_64) release build's `uv sync --frozen`.
   "cryptography>=48.0.1,<49",
   "pyyaml>=6.0",
+  # claude-cli/ subscription execution lane (opt-in via STRIX_LLM=claude-cli/<model>).
+  # Imported lazily inside strix/llm/claude_cli so the default API-key lane never
+  # loads it. Pinned <0.3 to keep the CLI/SDK event-stream contract deterministic.
+  "claude-agent-sdk>=0.2.152,<0.3",
 ]
 
 [project.optional-dependencies]
@@ -127,6 +131,7 @@ pretty = true
 [[tool.mypy.overrides]]
 module = [
     "litellm.*",
+    "claude_agent_sdk.*",
     "rich.*",
     "jinja2.*",
     "cvss.*",
@@ -247,6 +252,10 @@ ignore = [
 "tests/test_mcp_client.py" = ["S105", "S106", "ARG002"]
 # MCP connection request in a test carries a dummy bearer token.
 "tests/test_runner_root_prompt.py" = ["S106"]
+# These tests use pytest only for the MonkeyPatch annotation; keep the import at
+# top-level as the test idiom rather than gating it behind TYPE_CHECKING.
+"tests/test_claude_cli_dispatch.py" = ["TC002"]
+"tests/test_claude_cli_tool_adapter.py" = ["TC002"]
 # Stdlib HTTP handler overrides (do_GET/do_POST) and lazy imports that avoid a
 # circular dependency with strix.telemetry / strix.interface.viewer.report_pdf.
 "strix/interface/viewer/server.py" = ["N802", "PLC0415"]

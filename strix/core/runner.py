@@ -43,6 +43,8 @@ from strix.core.inputs import (
 )
 from strix.core.paths import run_dir_for, runtime_state_dir
 from strix.core.sessions import open_agent_session
+from strix.llm import claude_cli
+from strix.llm.claude_cli import notice as claude_cli_notice
 from strix.report.state import get_global_report_state
 from strix.runtime import session_manager
 from strix.telemetry import set_scan_phase
@@ -260,6 +262,15 @@ async def run_strix_scan(
             "No LLM model configured. Set STRIX_LLM env or pass model= to run_strix_scan().",
         )
     logger.info("LLM model resolved: %s", resolved_model)
+
+    # claude-cli/ lane gate — fail fast before any scan activity (sandbox, bundle,
+    # coordinator). Raises ClaudeCliLaneError on ANTHROPIC_API_KEY conflict, a
+    # missing `claude` CLI, or an empty slug (SC-3). A no-op for every other model.
+    claude_cli.ensure_lane_admissible(resolved_model)
+    if claude_cli.claude_cli_lane_model(resolved_model) is not None:
+        # One-time subscription/ToS notice at scan start (SC-8, AD-5).
+        claude_cli_notice.show_notice_and_acknowledge()
+
     chat_completions_tools = uses_chat_completions_tool_schema(resolved_model, settings)
     strict_tool_schemas = supports_strict_tool_schemas(resolved_model)
     if not strict_tool_schemas:
