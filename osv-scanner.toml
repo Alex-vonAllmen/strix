@@ -78,3 +78,21 @@ reason = "pypdf 6.14.2; fix tracked for next upstream sync"
 [[IgnoredVulns]]
 id = "GHSA-c83g-rgw3-j3cx"
 reason = "browserslist dev-only (viewer frontend build chain), fix rides next upstream sync"
+
+# Remaining npm dev-dependency advisories in the viewer frontend build chain
+# (package-lock.json); all fix-versions ride the next upstream sync.
+[[IgnoredVulns]]
+id = "GHSA-73wf-gq98-2v4g"
+reason = "browserslist dev-only (viewer frontend build chain), fix rides next upstream sync"
+
+[[IgnoredVulns]]
+id = "GHSA-w5vr-8v7q-w6rv"
+reason = "baseline-browser-mapping dev-only (viewer frontend build chain), fix rides next upstream sync"
+
+[[IgnoredVulns]]
+id = "GHSA-2v37-7h3g-55p8"
+reason = "nanoid dev-only (viewer frontend build chain), fix rides next upstream sync"
+
+[[IgnoredVulns]]
+id = "GHSA-fxqj-rqcc-2cmp"
+reason = "postcss dev-only (viewer frontend build chain), fix rides next upstream sync"
