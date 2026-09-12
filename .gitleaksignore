@@ -1,0 +1,12 @@
+# Known false positives in upstream (usestrix/strix) content — fingerprints
+# from the 2026-09-12 canary run of .github/workflows/security.yml.
+# Do not add fingerprints for our own commits here; fix or suppress those at
+# the source instead.
+#
+# Upstream doc examples (skills/technologies/grafana_prometheus.md:135,
+# skills/tooling/python.md:96): illustrative placeholder keys in prose.
+8cd9abba21d9a921ba740c9b3f8f82543f864cd6:strix/skills/technologies/grafana_prometheus.md:generic-api-key:135
+9d7f754b5944ce3f7633237bdc9ad8aafbadc17f:strix/skills/tooling/python.md:generic-api-key:96
+# Upstream PostHog telemetry key (telemetry/posthog.py:14): public
+# client-side ingestion token by design, shipped in upstream releases.
+94bb97143ef4b9288841723cbd42c6eeae7815a6:strix/telemetry/posthog.py:generic-api-key:14

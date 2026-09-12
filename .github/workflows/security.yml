@@ -1,0 +1,103 @@
+name: security
+
+# Mirror of the dev-team security gate (stealth-mode precedent), adapted for a
+# Python/uv repo. Vera's stage reads this workflow's runs + the semgrep-sarif
+# artifact; a missing run reads as needs-context, so it must exist before the
+# first security-gated PR.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly full scan catches advisories published against unchanged deps.
+    - cron: "30 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  actionlint:
+    name: actionlint (workflows)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Lint workflow files
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/repo" -w /repo \
+            rhysd/actionlint:1.7.12 -color
+
+  semgrep:
+    name: semgrep (SAST)
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep:1.174.0
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Run Semgrep
+        run: |
+          semgrep scan \
+            --metrics=off \
+            --error \
+            --config=p/default \
+            --config=p/owasp-top-ten \
+            --config=p/python \
+            --config=p/secrets \
+            --text \
+            --sarif-output=semgrep.sarif
+
+      - name: Upload SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: semgrep-sarif
+          path: semgrep.sarif
+          if-no-files-found: ignore
+          retention-days: 30
+
+  secrets:
+    name: gitleaks (secrets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          # Full history: a secret committed and later deleted is still in the
+          # pack files and still valid until rotated.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan git history
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/repo" \
+            -e GIT_CONFIG_COUNT=1 \
+            -e GIT_CONFIG_KEY_0=safe.directory \
+            -e GIT_CONFIG_VALUE_0=/repo \
+            ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            git /repo --redact --verbose --exit-code 1
+
+  dependencies:
+    name: osv-scanner (dependencies)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Scan lockfiles
+        uses: google/osv-scanner-action/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
+        with:
+          scan-args: |-
+            --config=./osv-scanner.toml
+            --recursive
+            ./
