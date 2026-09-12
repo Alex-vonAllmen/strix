@@ -14,6 +14,7 @@ from strix.interface.utils import (
     image_exists,
     process_pull_line,
 )
+from strix.llm import claude_cli
 from strix.telemetry import report_error
 
 
@@ -48,6 +49,19 @@ def validate_environment() -> None:
             report_error("subscription_not_signed_in")
             sys.exit(1)
         logger.info("Environment OK (ChatGPT subscription)")
+        return
+
+    # Placed after the codex branch so its early return cannot shadow the lane
+    # check. The claude-cli/ lane runs on a Claude Pro/Max subscription login and
+    # needs no LLM_API_KEY, so an admissible lane returns OK here.
+    if claude_cli.is_claude_cli_lane(settings.llm.model):
+        try:
+            claude_cli.ensure_lane_admissible(settings.llm.model)
+        except claude_cli.ClaudeCliLaneError as exc:
+            console.print(f"[red]{exc}[/]")
+            report_error("claude_cli_lane_inadmissible")
+            sys.exit(1)
+        logger.info("Environment OK (Claude subscription)")
         return
 
     if not settings.llm.model:

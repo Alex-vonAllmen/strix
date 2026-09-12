@@ -33,6 +33,7 @@ from strix.core.sessions import (
     seed_initial_input,
     strip_all_images_from_session,
 )
+from strix.llm import claude_cli
 from strix.llm.compaction import is_context_overflow, maybe_compact
 
 
@@ -86,7 +87,8 @@ def _structured_provider_refusal(result: Any) -> str | None:
 
 
 def _run_config_model(run_config: RunConfig) -> str | None:
-    return run_config.model if isinstance(run_config.model, str) else None
+    model = getattr(run_config, "model", None)
+    return model if isinstance(model, str) else None
 
 
 def _agent_instructions(agent: Any) -> str:
@@ -676,15 +678,31 @@ async def _run_cycle(  # noqa: PLR0912, PLR0915
                     logger.exception("proactive compaction failed for %s", agent_id)
                 with contextlib.suppress(Exception):
                     pre_run_items = list(await session.get_items())
-            stream = Runner.run_streamed(
-                agent,
-                input=input_data,
-                run_config=run_config,
-                context=context,
-                max_turns=max_turns,
-                session=session,
-                hooks=hooks,
-            )
+            if claude_cli.claude_cli_lane_model(_run_config_model(run_config)) is not None:
+                # claude-cli/ lane: Claude Code is the agent and Strix supplies its
+                # tools over MCP. The claude_agent_sdk import stays inside the lane
+                # package (AD-6), so the default path never loads it.
+                from strix.llm.claude_cli.dispatch import ClaudeCliStream
+
+                stream = ClaudeCliStream(
+                    agent,
+                    input=input_data,
+                    run_config=run_config,
+                    context=context,
+                    max_turns=max_turns,
+                    session=session,
+                    hooks=hooks,
+                )
+            else:
+                stream = Runner.run_streamed(
+                    agent,
+                    input=input_data,
+                    run_config=run_config,
+                    context=context,
+                    max_turns=max_turns,
+                    session=session,
+                    hooks=hooks,
+                )
             await coordinator.attach_stream(agent_id, stream)
             try:
                 try:
