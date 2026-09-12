@@ -47,6 +47,7 @@ from openai.types.responses import (
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
 from strix.llm.claude_cli import ClaudeCliLaneError, claude_cli_lane_model
+from strix.llm.claude_cli.sandbox_bridge import build_sandbox_bridge, sandbox_tool_names
 from strix.llm.claude_cli.server import build_tool_server, exposed_tool_names
 
 
@@ -160,6 +161,20 @@ class ClaudeCliStream:
         """The SDK transcript captured so far, as response-input items (salvage)."""
         return list(self._transcript)
 
+    def _sandbox_session(self) -> Any:
+        """The run's sandbox session, for the M2 bridge.
+
+        Prefer ``run_config.sandbox.session`` (present for root and children — they
+        share one ``run_config``); fall back to ``context["sandbox_session"]``.
+        Returns None when no sandbox is wired (e.g. a lane unit test), in which case
+        the bridge is simply not attached.
+        """
+        sandbox = getattr(self._run_config, "sandbox", None)
+        session = getattr(sandbox, "session", None)
+        if session is not None:
+            return session
+        return self._context.get("sandbox_session")
+
     async def stream_events(self) -> AsyncIterator[Any]:
         sdk = _import_sdk()
 
@@ -168,17 +183,26 @@ class ClaudeCliStream:
             prompt = "Continue."
 
         tools = list(getattr(self._agent, "tools", []) or [])
-        server = build_tool_server(tools, self._context)
+        mcp_servers: dict[str, Any] = {"strix": build_tool_server(tools, self._context)}
         allowed = exposed_tool_names(tools)
+
+        # Sandbox bridge (M2, AD-3): shell/fs tools over the run's sandbox session,
+        # replacing the OpenAI-SDK Shell/Filesystem capabilities that Claude Code
+        # lacks. Every agent (root + children) shares the run's session, so the
+        # bridge routes into the same Docker sandbox with the Caido proxy active.
+        sandbox_session = self._sandbox_session()
+        if sandbox_session is not None:
+            mcp_servers["strix-sandbox"] = build_sandbox_bridge(sandbox_session)
+            allowed = [*allowed, *sandbox_tool_names()]
 
         options = sdk.ClaudeAgentOptions(
             system_prompt=getattr(self._agent, "instructions", None),
             model=self._model_slug,
-            mcp_servers={"strix": server},
+            mcp_servers=mcp_servers,
             allowed_tools=allowed,
-            # Invariant I-1: no built-in host tools (Bash, Read, Web*, Task, ...);
-            # only the mcp__strix__* tools the adapter exposes are reachable, so the
-            # sandbox and proxy guarantees hold.
+            # Invariant I-1/I-2: no built-in host tools (Bash, Read, Web*, Task, ...);
+            # only the mcp__strix__* host tools and mcp__strix-sandbox__* sandbox tools
+            # are reachable, so the sandbox and proxy guarantees hold.
             tools=[],
             strict_mcp_config=True,
             permission_mode="bypassPermissions",
