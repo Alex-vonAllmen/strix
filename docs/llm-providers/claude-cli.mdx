@@ -1,0 +1,70 @@
+---
+title: "Claude subscription (claude-cli)"
+description: "Run Strix on a Claude Pro/Max subscription login through the claude CLI — no metered API key"
+---
+
+The `claude-cli/` lane runs Strix on your **Claude Pro/Max subscription** through
+the [`claude` CLI](https://docs.claude.com/claude-code) / `claude-agent-sdk`,
+instead of a metered `LLM_API_KEY`. Claude Code becomes the agent and Strix supplies
+its full pentest toolkit over MCP, reusing the same Docker sandbox and Caido proxy as
+every other lane.
+
+<Warning>
+Automated, unattended use of a personal Claude subscription through the CLI is
+outside Anthropic's official API surface — you choose this path knowingly. Strix
+shows a one-time notice on first use and records your acknowledgment in
+`~/.strix/claude-cli-ack.json`. Only scan targets you are authorized to test.
+</Warning>
+
+## Prerequisites
+
+1. Install the `claude` CLI and sign in to your Pro/Max subscription:
+   ```bash
+   claude   # then complete the login
+   ```
+2. Docker running (the Strix sandbox), as with any local scan.
+3. **`ANTHROPIC_API_KEY` must be unset** — the lane refuses to run alongside a
+   metered key so a scan can never silently bill the API.
+
+## Setup
+
+```bash
+export STRIX_LLM="claude-cli/claude-opus-5"   # claude-cli/<model>
+unset ANTHROPIC_API_KEY
+strix -n -t ./ --scan-mode quick
+```
+
+The opt-in is the `claude-cli/` prefix itself — there is no extra flag. Any other
+`STRIX_LLM` value uses the normal metered API lane, unchanged.
+
+## What runs where
+
+- **Host tools** — every Strix `FunctionTool` (notes, proxy, reporting, threat
+  model, web search, the multi-agent graph, …) is exposed to Claude Code as
+  `mcp__strix__*`.
+- **Sandbox tools** — `shell_exec`, `fs_read`, `fs_write`, `fs_list` are exposed as
+  `mcp__strix-sandbox__*` and execute **inside the Docker sandbox** with the Caido
+  proxy active. All paths resolve inside the sandbox workspace; host paths are
+  refused.
+- **No built-in Claude Code tools** (Bash, Read, Write, Web*, Task, …) are reachable
+  — only the Strix MCP tools above — so the sandbox and proxy guarantees hold.
+- **Multi-agent** — child agents spawn exactly as on the default lane; each runs
+  through its own `claude` subprocess with the same host + sandbox tools.
+
+## Limitations
+
+- The sandbox bridge exposes command execution and file read/write/list. Interactive
+  stdin (`write_stdin`) and long-lived background processes from the default lane's
+  shell capability are not mirrored yet.
+- Cost/budget accounting records token usage from the CLI; a subscription run is not
+  metered, so a USD `--max-budget` only binds when pricing is known for the model.
+  The turn budget (`--max-turns`) always applies.
+- Resuming a lane scan restores history via crash salvage; full SDK session-store
+  resume is not wired.
+
+## How it compares to the ChatGPT (Codex) lane
+
+Both let you run on a subscription login. The Codex lane is an OpenAI-Agents `Model`
+subclass (`chatgpt/<model>`); the `claude-cli/` lane is **not** a model — a Pro/Max
+login has no raw model endpoint, so Claude Code is itself the agent loop and Strix
+feeds it tools over MCP.

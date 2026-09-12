@@ -256,6 +256,12 @@ ignore = [
 # top-level as the test idiom rather than gating it behind TYPE_CHECKING.
 "tests/test_claude_cli_dispatch.py" = ["TC002"]
 "tests/test_claude_cli_tool_adapter.py" = ["TC002"]
+# Fake sandbox session / SDK client match the real signatures; some args are unused.
+"tests/test_claude_cli_sandbox_bridge.py" = ["ARG002"]
+"tests/test_claude_cli_lane_sandbox_wiring.py" = ["ARG002"]
+# Opt-in e2e: runtime modules (runner, session_manager, docker) are imported lazily
+# inside test bodies so a skipped collection never pulls in Docker/the runtime.
+"tests/test_claude_cli_lane_e2e.py" = ["PLC0415"]
 # Stdlib HTTP handler overrides (do_GET/do_POST) and lazy imports that avoid a
 # circular dependency with strix.telemetry / strix.interface.viewer.report_pdf.
 "strix/interface/viewer/server.py" = ["N802", "PLC0415"]
