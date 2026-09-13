@@ -400,4 +400,12 @@ def subscription_model(model_name: str | None) -> str | None:
 
 
 def auth_mode(model_name: str | None) -> str:
-    return "subscription" if subscription_model(model_name) else "api_key"
+    if subscription_model(model_name):
+        return "subscription"
+    # The claude-cli/ lane also runs on a Pro/Max subscription login, not a
+    # metered key, so its runs must be zero-cost too — otherwise the litellm
+    # estimate accrues and a USD --max-budget stops a subscription scan early
+    # (#14). Imported lazily: config must not import llm at module load.
+    from strix.llm.claude_cli import is_claude_cli_lane
+
+    return "subscription" if is_claude_cli_lane(model_name) else "api_key"
