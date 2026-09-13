@@ -108,6 +108,44 @@ def _input_to_prompt(input_data: Any) -> str:
     return ""
 
 
+# Text markers the `claude` CLI uses when the selected model is unknown/inaccessible.
+_MODEL_ERROR_MARKERS = (
+    "issue with the selected model",
+    "may not exist or you may not have access",
+)
+
+
+def _looks_like_model_error(assistant_error: str | None, text: str) -> bool:
+    if assistant_error and "model" in assistant_error.lower():
+        return True
+    lowered = text.lower()
+    return any(marker in lowered for marker in _MODEL_ERROR_MARKERS)
+
+
+def _model_error_message(
+    result_text: Any, assistant_error: str | None, model_slug: str | None
+) -> str:
+    """Build the terminal error text from the CLI's own message.
+
+    Adds a hyphen-vs-dot hint when the failure is a model-not-found near-miss and the
+    configured slug contains a ``.`` (the CLI's model ids use hyphens, e.g.
+    ``claude-opus-4-8``, not ``claude-opus-4.8``).
+    """
+    base = (
+        result_text.strip()
+        if isinstance(result_text, str) and result_text.strip()
+        else "the claude CLI returned an error"
+    )
+    message = f"claude-cli lane: {base}"
+    if model_slug and "." in model_slug and _looks_like_model_error(assistant_error, base):
+        suggestion = model_slug.replace(".", "-")
+        message += (
+            f" Did you mean 'claude-cli/{suggestion}'? "
+            "The claude CLI's model ids use hyphens (e.g. claude-opus-4-8), not dots."
+        )
+    return message
+
+
 class ClaudeCliStream:
     """Duck-typed replacement for a streamed ``RunResult`` on the ``claude-cli/`` lane.
 
@@ -142,6 +180,11 @@ class ClaudeCliStream:
         self._new_items: list[Any] = []
         self._run_loop_exception: BaseException | None = None
         self._sequence = 0
+        # An error code the CLI attached to an assistant message this cycle (e.g.
+        # "model_not_found"); remembered until the ResultMessage so the lane can fail
+        # fast with a clear message instead of returning a tool-call-free turn that the
+        # recovery loop would burn through (issue #5).
+        self._assistant_error: str | None = None
 
     # -- Inter-milestone seam (duck-type contract consumed by _run_cycle) --------
 
@@ -235,6 +278,9 @@ class ClaudeCliStream:
             return
 
         if isinstance(message, sdk.AssistantMessage):
+            error = getattr(message, "error", None)
+            if error:
+                self._assistant_error = str(error)
             for item in self._translate_assistant(sdk, message):
                 yield item
             return
@@ -245,6 +291,19 @@ class ClaudeCliStream:
             return
 
         if isinstance(message, sdk.ResultMessage):
+            # Fail fast on an errored CLI result (e.g. an unknown/inaccessible model):
+            # raise a clear terminal error instead of settling a tool-call-free turn
+            # that the lifecycle-recovery loop would burn through into a misleading
+            # MaxTurnsExceeded (issue #5). `is_error` is authoritative — `subtype` is
+            # "success" even on error — with the assistant error code as a backstop.
+            if getattr(message, "is_error", False) or self._assistant_error:
+                raise ClaudeCliLaneError(
+                    _model_error_message(
+                        getattr(message, "result", None),
+                        self._assistant_error,
+                        self._model_slug,
+                    )
+                )
             await self._record_usage(message)
             result_text = getattr(message, "result", None)
             if isinstance(result_text, str) and result_text:

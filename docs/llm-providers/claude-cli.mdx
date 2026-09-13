@@ -29,13 +29,30 @@ shows a one-time notice on first use and records your acknowledgment in
 ## Setup
 
 ```bash
-export STRIX_LLM="claude-cli/claude-opus-5"   # claude-cli/<model>
+export STRIX_LLM="claude-cli/claude-opus-4-8"   # claude-cli/<model>
 unset ANTHROPIC_API_KEY
 strix -n -t ./ --scan-mode quick
 ```
 
 The opt-in is the `claude-cli/` prefix itself — there is no extra flag. Any other
 `STRIX_LLM` value uses the normal metered API lane, unchanged.
+
+## Choosing a model
+
+The part after `claude-cli/` is passed straight to the `claude` CLI as its `--model`,
+so it must be a name the CLI accepts: an **alias** (`opus`, `sonnet`, `fable`) or a
+**full id** with **hyphens** (e.g. `claude-opus-4-8`, `claude-sonnet-4-5`). Note the
+hyphens — `claude-opus-4.8` (a dot) is **not** a valid id and the CLI rejects it.
+
+- `claude-cli/opus` — the latest Opus (currently **Opus 5**). Opus 5 applies stricter
+  cybersecurity guardrails and may refuse offensive-security prompts; for pentesting,
+  pin an explicit older Opus instead.
+- `claude-cli/claude-opus-4-8` — a specific Opus that tends not to trip those
+  guardrails. This is the recommended default for the lane.
+
+If you pass a model the CLI can't use, the scan now **fails fast** with the CLI's own
+message (and, for a dot-vs-hyphen slip, suggests the hyphenated form) rather than
+running to the turn limit.
 
 ## What runs where
 
