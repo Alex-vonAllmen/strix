@@ -68,6 +68,17 @@ async def preflight_model_connection(
 
     from strix.config.models import StrixProvider, configure_sdk_model_defaults
     from strix.core.inputs import make_model_settings
+    from strix.llm.claude_cli import ensure_lane_admissible, is_claude_cli_lane
+
+    # The claude-cli/ lane never routes through LiteLLM: its execution path is
+    # core/runner.py -> ClaudeCliStream, and StrixProvider cannot resolve a
+    # `claude-cli/...` model, so a LiteLLM probe here would abort every lane
+    # scan with "LLM Provider NOT provided". Validate the lane itself (claude on
+    # PATH, no metered ANTHROPIC key, non-empty slug) and skip the probe — this
+    # mirrors the gate runner.py enforces once the scan begins.
+    if is_claude_cli_lane(model_name):
+        ensure_lane_admissible(model_name)
+        return
 
     resolved_settings = load_settings() if settings is None else settings
     configure_sdk_model_defaults(resolved_settings)
