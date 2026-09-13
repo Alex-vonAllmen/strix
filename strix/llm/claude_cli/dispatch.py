@@ -108,6 +108,21 @@ def _input_to_prompt(input_data: Any) -> str:
     return ""
 
 
+# Errored ResultMessages that are benign cycle ends, not fatal lane errors: the CLI
+# hitting its per-run turn budget is the lane's analog of the default lane's
+# MaxTurnsExceeded, so it must not fail fast (issue #9).
+_BENIGN_TERMINAL_REASONS = frozenset({"max_turns"})
+_BENIGN_RESULT_SUBTYPES = frozenset({"error_max_turns"})
+
+
+def _is_benign_result(message: Any) -> bool:
+    """Whether an errored ``ResultMessage`` is a normal turn-limit end, not a fatal error."""
+    return (
+        getattr(message, "subtype", None) in _BENIGN_RESULT_SUBTYPES
+        or getattr(message, "terminal_reason", None) in _BENIGN_TERMINAL_REASONS
+    )
+
+
 # Text markers the `claude` CLI uses when the selected model is unknown/inaccessible.
 _MODEL_ERROR_MARKERS = (
     "issue with the selected model",
@@ -293,12 +308,14 @@ class ClaudeCliStream:
             return
 
         if isinstance(message, sdk.ResultMessage):
-            # Fail fast on an errored CLI result (e.g. an unknown/inaccessible model):
-            # raise a clear terminal error instead of settling a tool-call-free turn
-            # that the lifecycle-recovery loop would burn through into a misleading
-            # MaxTurnsExceeded (issue #5). `is_error` is authoritative — `subtype` is
-            # "success" even on error — with the assistant error code as a backstop.
-            if getattr(message, "is_error", False) or self._assistant_error:
+            # Fail fast on a genuinely fatal CLI result (unknown/inaccessible model,
+            # auth) — a clear terminal error, not a tool-call-free turn the recovery
+            # loop would burn into a misleading MaxTurnsExceeded (issue #5). But a
+            # benign turn-limit result (`error_max_turns`) is the lane's analog of the
+            # default lane's MaxTurnsExceeded, not a fatal error, so it must end the
+            # cycle normally and let the recovery/lifecycle loop proceed (issue #9).
+            is_error = getattr(message, "is_error", False)
+            if (is_error or self._assistant_error) and not _is_benign_result(message):
                 raise ClaudeCliLaneError(
                     _model_error_message(
                         getattr(message, "result", None),

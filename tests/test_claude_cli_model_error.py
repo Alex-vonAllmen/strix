@@ -34,9 +34,11 @@ async def _drive(stream: ClaudeCliStream, message: Any) -> list[Any]:
     return [event async for event in stream._translate(sdk, message)]
 
 
-def _result(*, is_error: bool, result: str | None) -> sdk.ResultMessage:
+def _result(*, is_error: bool, result: str | None, subtype: str = "success") -> sdk.ResultMessage:
+    # subtype "success" even on error — the reliable flag is is_error (issue #5); a
+    # benign turn-limit uses subtype "error_max_turns" (issue #9).
     return sdk.ResultMessage(
-        subtype="success",  # the CLI reports "success" even on error — must be ignored
+        subtype=subtype,
         duration_ms=1,
         duration_api_ms=1,
         is_error=is_error,
@@ -118,3 +120,26 @@ async def test_successful_result_does_not_raise() -> None:
     events = await _drive(stream, _result(is_error=False, result="all done"))
     assert events == []
     assert stream.final_output == "all done"
+
+
+# -- benign turn-limit is not fatal (issue #9, SC-1/SC-2) -------------------------
+
+
+async def test_error_max_turns_is_not_fatal() -> None:
+    """SC-1: an errored turn-limit result ends the cycle instead of raising."""
+    stream = _make_stream()
+    events = await _drive(
+        stream,
+        _result(is_error=True, result="Reached max turns (6)", subtype="error_max_turns"),
+    )
+    assert events == []  # no events, and crucially no ClaudeCliLaneError
+
+
+async def test_fatal_error_still_raises_after_narrowing() -> None:
+    """SC-2: a genuine (non-turn-limit) error still fails fast."""
+    stream = _make_stream()
+    with pytest.raises(ClaudeCliLaneError):
+        await _drive(
+            stream,
+            _result(is_error=True, result="model error", subtype="success"),
+        )
