@@ -25,6 +25,7 @@ default lane never loads it (AD-6). This module itself is imported lazily from
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from typing import TYPE_CHECKING, Any
@@ -107,6 +108,10 @@ def _input_to_prompt(input_data: Any) -> str:
         return "\n\n".join(parts)
     return ""
 
+
+# Bounds on the transcript re-fed for cross-cycle continuity (issue #9, OQ-4).
+_SEED_MAX_ITEMS = 40
+_SEED_MAX_CHARS = 12_000
 
 # Errored ResultMessages that are benign cycle ends, not fatal lane errors: the CLI
 # hitting its per-run turn budget is the lane's analog of the default lane's
@@ -219,6 +224,65 @@ class ClaudeCliStream:
         """The SDK transcript captured so far, as response-input items (salvage)."""
         return list(self._transcript)
 
+    def _lifecycle_settled(self) -> bool:
+        """Whether a lifecycle/parking tool has moved this agent out of ``running``.
+
+        Mirrors ``run_agent_loop``'s own "status != running" check: a lifecycle tool
+        (``finish_scan``/``agent_finish``) settles the agent terminal and a parking tool
+        (``respond_to_user``/``wait_for_agents``) sets it ``waiting`` — either way the
+        agent has yielded control and this SDK run should end (issue #9).
+        """
+        coordinator = self._context.get("coordinator")
+        agent_id = self._context.get("agent_id")
+        if coordinator is None or not isinstance(agent_id, str):
+            return False
+        status = getattr(coordinator, "statuses", {}).get(agent_id)
+        return status is not None and status != "running"
+
+    async def _seed_prompt(self) -> str:
+        """The cycle prompt: the cycle ``input`` if present, else a bounded transcript
+        re-fed from the run's session, else ``"Continue."``.
+
+        The lane builds a fresh SDK client per cycle, so an empty ``input`` (a recovery
+        or continuation cycle) would otherwise reach the CLI as a bare ``"Continue."``
+        with no task — which children hit first ("this session starts with just
+        'Continue,'"). Re-feeding the session's recent turns restores context (issue #9,
+        OQ-4).
+        """
+        prompt = _input_to_prompt(self._input)
+        if prompt:
+            return prompt
+        if self._session is not None:
+            seeded = await self._session_prompt()
+            if seeded:
+                return seeded
+        return "Continue."
+
+    async def _session_prompt(self) -> str:
+        try:
+            items = list(await self._session.get_items())  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001 - continuity is best-effort; never block the run.
+            logger.debug("could not read session items for claude-cli continuity", exc_info=True)
+            return ""
+        parts: list[str] = []
+        for item in items[-_SEED_MAX_ITEMS:]:
+            if not isinstance(item, dict):
+                continue
+            text = _text_from_content(item.get("content"))
+            if not text:
+                continue
+            role = item.get("role")
+            parts.append(f"{role}: {text}" if isinstance(role, str) else text)
+        if not parts:
+            return ""
+        transcript = "\n\n".join(parts)
+        if len(transcript) > _SEED_MAX_CHARS:
+            transcript = transcript[-_SEED_MAX_CHARS:]
+        return (
+            "Continue your task using the tools. Here is the recent context of this "
+            f"run:\n\n{transcript}"
+        )
+
     def _sandbox_session(self) -> Any:
         """The run's sandbox session, for the M2 bridge.
 
@@ -236,9 +300,7 @@ class ClaudeCliStream:
     async def stream_events(self) -> AsyncIterator[Any]:
         sdk = _import_sdk()
 
-        prompt = _input_to_prompt(self._input)
-        if not prompt:
-            prompt = "Continue."
+        prompt = await self._seed_prompt()
 
         tools = list(getattr(self._agent, "tools", []) or [])
         mcp_servers: dict[str, Any] = {
@@ -278,6 +340,15 @@ class ClaudeCliStream:
             async for message in client.receive_response():
                 async for event in self._translate(sdk, message):
                     yield event
+                # The lane's tool_use_behavior (issue #9): Claude Code keeps running
+                # after a Strix lifecycle/parking tool succeeds, so — like the default
+                # lane's Runner — end the SDK run as soon as the tool has settled this
+                # agent (status left "running"), instead of letting it run to the CLI's
+                # max_turns.
+                if self._lifecycle_settled():
+                    with contextlib.suppress(Exception):
+                        await client.interrupt()
+                    break
         finally:
             # Deterministic teardown: never leave an orphaned `claude` subprocess.
             try:

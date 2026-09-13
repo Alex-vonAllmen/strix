@@ -265,6 +265,8 @@ ignore = [
 # Test doubles match the tool on_invoke_tool signature (unused args); pytest is used
 # only for the MonkeyPatch annotation.
 "tests/test_claude_cli_tool_run_config.py" = ["ARG001", "TC002"]
+# Fake SDK client matches ClaudeSDKClient's signature; some args are unused.
+"tests/test_claude_cli_completion.py" = ["ARG002"]
 # Stdlib HTTP handler overrides (do_GET/do_POST) and lazy imports that avoid a
 # circular dependency with strix.telemetry / strix.interface.viewer.report_pdf.
 "strix/interface/viewer/server.py" = ["N802", "PLC0415"]

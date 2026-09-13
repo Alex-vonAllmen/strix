@@ -95,7 +95,7 @@ async def test_sc2_full_scan_completes_without_metered_key(monkeypatch: pytest.M
         scan_id=scan_id,
         image=image,
         model=_MODEL,
-        max_turns=6,
+        max_turns=20,  # deep mode needs headroom to reach finish_scan
         max_budget_usd=None,
     )
     # The scan ran through the lane to a terminal state without a metered key
@@ -127,7 +127,7 @@ async def test_sc5_children_spawn_under_the_lane(monkeypatch: pytest.MonkeyPatch
         image=image,
         model=_MODEL,
         coordinator=coordinator,
-        max_turns=10,
+        max_turns=40,  # multi-agent: root + children need room to finish
         max_budget_usd=None,
     )
     # At least the root ran through the lane; any children are registered on the graph.
