@@ -226,7 +226,9 @@ class ClaudeCliStream:
             prompt = "Continue."
 
         tools = list(getattr(self._agent, "tools", []) or [])
-        mcp_servers: dict[str, Any] = {"strix": build_tool_server(tools, self._context)}
+        mcp_servers: dict[str, Any] = {
+            "strix": build_tool_server(tools, self._context, run_config=self._run_config)
+        }
         allowed = exposed_tool_names(tools)
 
         # Sandbox bridge (M2, AD-3): shell/fs tools over the run's sandbox session,
