@@ -515,6 +515,12 @@ async def _run_until_lifecycle(
 
         status = await _agent_status(coordinator, agent_id)
         if status != "running":
+            logger.info(
+                "[#24-diag] run_agent_loop RETURN agent=%s status=%s parent=%s",
+                agent_id,
+                status,
+                context.get("parent_id"),
+            )
             await coordinator.reset_recovery(agent_id)
             return result
 
@@ -1038,6 +1044,7 @@ async def _start_child_runner(
         # ``_run_cycle``. Swallow it here so the detached task does not surface a
         # spurious "Task exception was never retrieved" warning. The root agent
         # hits the same limit on its next call and tears the scan down.
+        logger.info("[#24-diag] child loop STARTED %s (%s)", child_id, name)
         try:
             await run_agent_loop(
                 agent=child_agent,
@@ -1058,6 +1065,8 @@ async def _start_child_runner(
         except SubagentBudgetReservedError:
             logger.info("child %s stopped at the sub-agent budget reserve", child_id)
         finally:
+            end_status = await _agent_status(coordinator, child_id)
+            logger.info("[#24-diag] child loop ENDED %s (%s) status=%s", child_id, name, end_status)
             if not coordinator.is_shutting_down:
                 await _notify_parent_on_exit(coordinator, child_id)
 

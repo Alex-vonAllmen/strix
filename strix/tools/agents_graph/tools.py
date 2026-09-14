@@ -396,6 +396,9 @@ async def wait_for_agents(  # noqa: PLR0911
 
     pending, items = await coordinator.consume_pending(me, include_items=True)
     if pending > 0:
+        logger.info(
+            "[#24-diag] wait_for_agents %s branch=message_arrived_early pending=%d", me, pending
+        )
         await coordinator.mark_running(me)
         return json.dumps(
             {
@@ -425,6 +428,9 @@ async def wait_for_agents(  # noqa: PLR0911
     # Non-interactive agents cannot be woken once terminal, so with nobody
     # running or waiting there is no message left to wait for.
     if not await coordinator.active_agents_except(me):
+        logger.info(
+            "[#24-diag] wait_for_agents %s branch=no_active_agents (status left waiting)", me
+        )
         _, statuses, names, _ = await coordinator.graph_snapshot()
         return json.dumps(
             {
@@ -447,10 +453,12 @@ async def wait_for_agents(  # noqa: PLR0911
             default=str,
         )
 
+    logger.info("[#24-diag] wait_for_agents %s branch=BLOCKING timeout=%ss", me, timeout_seconds)
     await coordinator.park_waiting(me, wait_kind="agents")
     try:
         await asyncio.wait_for(coordinator.wait_for_message(me), timeout_seconds)
     except TimeoutError:
+        logger.info("[#24-diag] wait_for_agents %s branch=TIMEOUT after %ss", me, timeout_seconds)
         await coordinator.mark_running(me)
         return json.dumps(
             {
@@ -479,6 +487,7 @@ async def wait_for_agents(  # noqa: PLR0911
         )
 
     pending, items = await coordinator.consume_pending(me, include_items=True)
+    logger.info("[#24-diag] wait_for_agents %s branch=WOKEN pending=%d", me, pending)
     await coordinator.mark_running(me)
 
     return json.dumps(
