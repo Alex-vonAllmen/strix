@@ -259,6 +259,11 @@ class ClaudeCliStream:
         # fast with a clear message instead of returning a tool-call-free turn that the
         # recovery loop would burn through (issue #5).
         self._assistant_error: str | None = None
+        # Set when we deliberately interrupt a settled agent to drain its final
+        # ResultMessage (#28). That ResultMessage comes back is_error=True with
+        # terminal_reason="aborted_streaming" — expected, not a CLI failure — so the
+        # fatal-error guard must not mistake our own interrupt for a crash (#32).
+        self._settle_interrupted = False
 
     # -- Inter-milestone seam (duck-type contract consumed by _run_cycle) --------
 
@@ -432,6 +437,7 @@ class ClaudeCliStream:
                 # instead of thrown away (#28). Interrupt once.
                 if not interrupted and self._lifecycle_settled():
                     interrupted = True
+                    self._settle_interrupted = True
                     logger.info(
                         "[#24-diag] lane settled status=%s agent=%s; interrupting, "
                         "draining to ResultMessage",
@@ -453,6 +459,19 @@ class ClaudeCliStream:
                     Path(prompt_file_path).unlink()
 
     # -- Translation -------------------------------------------------------------
+
+    def _is_settle_interrupt_result(self, message: Any) -> bool:
+        """Whether this errored ResultMessage is the one our settle-interrupt produced.
+
+        The drain in ``stream_events`` calls ``client.interrupt()`` on a settled agent
+        to grab its final usage (#28); the SDK then emits a ResultMessage with
+        ``terminal_reason="aborted_streaming"``. That is our own doing, not a CLI
+        failure, so it must not trip the fatal-error guard (#32).
+        """
+        return (
+            self._settle_interrupted
+            and getattr(message, "terminal_reason", None) == "aborted_streaming"
+        )
 
     async def _translate(self, sdk: Any, message: Any) -> AsyncIterator[Any]:
         if isinstance(message, sdk.StreamEvent):
@@ -481,8 +500,15 @@ class ClaudeCliStream:
             # benign turn-limit result (`error_max_turns`) is the lane's analog of the
             # default lane's MaxTurnsExceeded, not a fatal error, so it must end the
             # cycle normally and let the recovery/lifecycle loop proceed (issue #9).
+            # And when *we* interrupted a settled agent to drain its usage (#28), the
+            # ResultMessage comes back is_error=True / terminal_reason=aborted_streaming
+            # — our own doing, not a crash — so that too must not raise (#32).
             is_error = getattr(message, "is_error", False)
-            if (is_error or self._assistant_error) and not _is_benign_result(message):
+            if (
+                (is_error or self._assistant_error)
+                and not _is_benign_result(message)
+                and not self._is_settle_interrupt_result(message)
+            ):
                 raise ClaudeCliLaneError(
                     _model_error_message(
                         getattr(message, "result", None),
