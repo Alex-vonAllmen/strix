@@ -169,6 +169,18 @@ def _model_error_message(
     return message
 
 
+# Tools that move a strix agent out of "running" — the only ones that end a
+# turn the way the runner's recovery loop expects (finish_scan/agent_finish) or
+# park it (wait_for_agents/respond_to_user). Used only for the stall diagnostic
+# (#24); matched against the trailing segment of an MCP tool name.
+_LIFECYCLE_TOOLS = frozenset({"finish_scan", "agent_finish", "wait_for_agents", "respond_to_user"})
+
+
+def _is_lifecycle_tool(name: str) -> bool:
+    """Whether ``name`` is a lifecycle/parking tool (e.g. ``mcp__strix__finish_scan``)."""
+    return name.rsplit("__", 1)[-1] in _LIFECYCLE_TOOLS
+
+
 def _system_prompt_option(instructions: Any) -> tuple[Any, str | None]:
     """Resolve the SDK ``system_prompt`` for an agent's instructions (#16).
 
@@ -232,6 +244,9 @@ class ClaudeCliStream:
         self._final_output: str | None = None
         self._transcript: list[dict[str, Any]] = []
         self._new_items: list[Any] = []
+        # Stall diagnostic (#24): tool names Claude Code called this cycle, so the
+        # cycle-end log can report whether a lifecycle tool was ever issued.
+        self._tools_seen: list[str] = []
         self._run_loop_exception: BaseException | None = None
         self._sequence = 0
         # An error code the CLI attached to an assistant message this cycle (e.g.
@@ -272,6 +287,14 @@ class ClaudeCliStream:
             return False
         status = getattr(coordinator, "statuses", {}).get(agent_id)
         return status is not None and status != "running"
+
+    def _cycle_end_status(self) -> str:
+        """The agent's coordinator status, for the #24 stall diagnostic."""
+        coordinator = self._context.get("coordinator")
+        agent_id = self._context.get("agent_id")
+        if coordinator is None or not isinstance(agent_id, str):
+            return "unknown"
+        return str(getattr(coordinator, "statuses", {}).get(agent_id, "unknown"))
 
     async def _seed_prompt(self) -> str:
         """The cycle prompt: the cycle ``input`` if present, else a bounded transcript
@@ -443,6 +466,23 @@ class ClaudeCliStream:
             result_text = getattr(message, "result", None)
             if isinstance(result_text, str) and result_text:
                 self._final_output = result_text
+            # Stall diagnostic (#24): why did this cycle end, and did the model
+            # ever call a lifecycle tool? A cycle that ends with no lifecycle
+            # tool and status still "running" is what the runner's recovery loop
+            # burns through into "ended without finish_scan".
+            lifecycle_seen = [t for t in self._tools_seen if _is_lifecycle_tool(t)]
+            logger.info(
+                "claude-cli cycle end: subtype=%s terminal_reason=%s num_turns=%s "
+                "is_error=%s tools=%d lifecycle_tools=%s final_output=%s end_status=%s",
+                getattr(message, "subtype", None),
+                getattr(message, "terminal_reason", None),
+                getattr(message, "num_turns", None),
+                getattr(message, "is_error", None),
+                len(self._tools_seen),
+                lifecycle_seen or "none",
+                "present" if self._final_output else "empty",
+                self._cycle_end_status(),
+            )
             return
 
     def _next_seq(self) -> int:
@@ -490,6 +530,7 @@ class ClaudeCliStream:
                 self._transcript.append({"role": "assistant", "content": text})
                 events.append(RunItemStreamEvent(name="message_output_created", item=item))
             elif isinstance(block, sdk.ToolUseBlock):
+                self._tools_seen.append(block.name)
                 arguments = json.dumps(block.input or {})
                 raw_call = ResponseFunctionToolCall(
                     arguments=arguments,
