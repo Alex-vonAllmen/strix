@@ -28,6 +28,9 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agents.items import (
@@ -164,6 +167,37 @@ def _model_error_message(
             "The claude CLI's model ids use hyphens (e.g. claude-opus-4-8), not dots."
         )
     return message
+
+
+def _system_prompt_option(instructions: Any) -> tuple[Any, str | None]:
+    """Resolve the SDK ``system_prompt`` for an agent's instructions (#16).
+
+    A ``str`` system prompt is rendered by the SDK transport into an inline
+    ``--system-prompt <text>`` argv element. A child agent that loads skills
+    produces a prompt larger than Linux's per-argument limit
+    (``MAX_ARG_STRLEN``, 128 KiB), so ``execve`` of the bundled ``claude`` fails
+    with ``E2BIG`` and the child crashes before it starts — the whole point of
+    the multi-agent graph on this lane.
+
+    Writing the prompt to a temp file and passing a ``SystemPromptFile``
+    (``{"type": "file", "path": ...}``) makes the SDK use ``--system-prompt-file``
+    instead, so the prompt never touches argv and the size ceiling disappears.
+
+    Returns ``(system_prompt, temp_path)``; ``temp_path`` is non-None only when a
+    file was written and must be unlinked by the caller after the run. ``None``
+    and empty prompts pass through unchanged (the SDK handles those inline).
+    """
+    if isinstance(instructions, str) and instructions:
+        fd, path = tempfile.mkstemp(prefix="strix-sysprompt-", suffix=".txt")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(instructions)
+        except Exception:
+            with contextlib.suppress(OSError):
+                Path(path).unlink()
+            raise
+        return {"type": "file", "path": path}, path
+    return instructions, None
 
 
 class ClaudeCliStream:
@@ -317,8 +351,14 @@ class ClaudeCliStream:
             mcp_servers["strix-sandbox"] = build_sandbox_bridge(sandbox_session)
             allowed = [*allowed, *sandbox_tool_names()]
 
+        # #16: pass the system prompt as a file, never inline argv — see
+        # _system_prompt_option. prompt_file_path is unlinked in the finally.
+        system_prompt, prompt_file_path = _system_prompt_option(
+            getattr(self._agent, "instructions", None)
+        )
+
         options = sdk.ClaudeAgentOptions(
-            system_prompt=getattr(self._agent, "instructions", None),
+            system_prompt=system_prompt,
             model=self._model_slug,
             mcp_servers=mcp_servers,
             allowed_tools=allowed,
@@ -355,6 +395,11 @@ class ClaudeCliStream:
                 await client.disconnect()
             except Exception:  # noqa: BLE001 - teardown must not mask a real error.
                 logger.debug("claude-cli client disconnect failed", exc_info=True)
+            # The claude process read --system-prompt-file at startup; the temp
+            # file is safe to remove now (#16).
+            if prompt_file_path is not None:
+                with contextlib.suppress(OSError):
+                    Path(prompt_file_path).unlink()
 
     # -- Translation -------------------------------------------------------------
 
