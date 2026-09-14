@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, ClassVar
 
 from strix.llm.claude_cli import dispatch
 from strix.llm.claude_cli.dispatch import ClaudeCliStream
@@ -75,9 +75,43 @@ class _FakeClient:
         return
 
 
-async def test_stream_interrupts_and_stops_when_settled(monkeypatch: Any) -> None:
-    coord = SimpleNamespace(statuses={"root": "completed"})  # already settled
-    stream = _stream({"coordinator": coord, "agent_id": "root"})
+class _Result:
+    """Stands in for ``sdk.ResultMessage`` — carries cumulative usage + result."""
+
+    is_error = False
+    subtype = "success"
+    terminal_reason = "aborted_streaming"
+    num_turns = 5
+    result = "done"
+    usage: ClassVar[dict[str, int]] = {
+        "input_tokens": 100,
+        "output_tokens": 20,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+    }
+
+
+async def test_stream_settles_then_drains_to_result_message(monkeypatch: Any) -> None:
+    # Settled from the start (a terminal lifecycle tool). The lane must interrupt
+    # once, then DRAIN to the ResultMessage — recording its usage + final_output —
+    # instead of breaking before it and losing them (#28).
+    coord = SimpleNamespace(statuses={"root": "completed"})
+
+    recorded: list[Any] = []
+
+    class _Hooks:
+        async def on_llm_end(self, _ctx: Any, _agent: Any, response: Any) -> None:
+            recorded.append(response.usage)
+
+    stream = ClaudeCliStream(
+        SimpleNamespace(name="a", instructions="sys", tools=[]),
+        input=[],
+        run_config=SimpleNamespace(model="claude-cli/claude-opus-4-8", sandbox=None),
+        context={"coordinator": coord, "agent_id": "root"},
+        max_turns=6,
+        session=None,
+        hooks=_Hooks(),
+    )
 
     created: list[_FakeClient] = []
 
@@ -85,12 +119,14 @@ async def test_stream_interrupts_and_stops_when_settled(monkeypatch: Any) -> Non
         StreamEvent = type("StreamEvent", (), {})
         AssistantMessage = type("AssistantMessage", (), {})
         UserMessage = type("UserMessage", (), {})
-        ResultMessage = type("ResultMessage", (), {})
+        ResultMessage = _Result
         ClaudeAgentOptions = SimpleNamespace
 
         @staticmethod
         def ClaudeSDKClient(options: Any = None) -> _FakeClient:  # noqa: N802
-            c = _FakeClient(options, messages=[object(), object(), object()])
+            # settle-marker, the ResultMessage, then a trailing message that must
+            # NOT be consumed (we stop AT the ResultMessage).
+            c = _FakeClient(options, messages=[object(), _Result(), object()])
             created.append(c)
             return c
 
@@ -99,10 +135,10 @@ async def test_stream_interrupts_and_stops_when_settled(monkeypatch: Any) -> Non
         pass
 
     client = created[0]
-    # It processed the first message, saw the agent had settled, interrupted and stopped —
-    # it did not drain all three messages.
     assert client.interrupted == 1
-    assert client.consumed == 1
+    assert client.consumed == 2  # settle-marker + ResultMessage, then stop
+    assert recorded and recorded[0].total_tokens == 120  # usage recorded (#28)
+    assert stream.final_output == "done"
 
 
 # -- session continuity (SC-4) ----------------------------------------------------
