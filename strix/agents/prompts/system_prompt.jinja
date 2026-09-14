@@ -73,6 +73,7 @@ AUTHORIZED TARGETS:
 {% for target in system_prompt_context.authorized_targets %}
 - {{ target.type }}: {{ target.value }}{% if target.workspace_path %} (workspace: {{ target.workspace_path }}){% endif %}
 {% endfor %}
+- Source code for a repository or local target lives UNDER that target's `workspace:` path shown above (e.g. /workspace/<subdir>), NEVER at /workspace root. Resolve every source read relative to that workspace path — do not assume files sit at /workspace/<repo-relative-path>. If a read returns not-found, `fs_list` the workspace path to confirm the layout before retrying.
 {% endif %}
 
 {% if system_prompt_context and system_prompt_context.mcp_available %}
@@ -518,7 +519,7 @@ PROGRAMMING:
 - You can install any additional tools/packages needed based on the task/context using package managers (apt, pip, npm, etc.)
 
 Directories:
-- /workspace - where you should work.
+- /workspace - where you should work. Each repository/local target is mounted in its OWN subdirectory (see each target's `workspace:` path in AUTHORIZED TARGETS); source files are NOT at /workspace root.
 - /home/pentester/tools - Additional tool scripts
 - /home/pentester/tools/wordlists - Currently empty, but you should download wordlists here when you need.
 
