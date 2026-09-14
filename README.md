@@ -306,6 +306,18 @@ export STRIX_LLM="chatgpt/gpt-5.4"   # chatgpt/<model> runs on the subscription
 strix auth status                    # show the active sign-in, or logout to forget it
 ```
 
+#### Sign in with a Claude subscription
+
+Or run Strix on your **Claude Pro/Max** subscription through the `claude` CLI — no metered key:
+
+```bash
+claude                                          # install the claude CLI, then complete the sign-in
+export STRIX_LLM="claude-cli/claude-opus-4-8"   # claude-cli/<model> runs on the subscription
+unset ANTHROPIC_API_KEY                         # the lane refuses to run alongside a metered key
+```
+
+The opt-in is the `claude-cli/` prefix itself; every other `STRIX_LLM` value uses the normal metered lane. Pin a **hyphenated** model id (e.g. `claude-opus-4-8`) rather than the `opus` alias — the latest Opus applies stricter cybersecurity guardrails. See the [claude-cli lane guide](https://docs.strix.ai/llm-providers/claude-cli).
+
 #### Use the managed platform: `strix cloud`
 
 Run scans on [app.strix.ai](https://app.strix.ai) from the terminal, without Docker or an LLM key:
