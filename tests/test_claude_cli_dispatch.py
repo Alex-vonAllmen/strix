@@ -102,3 +102,18 @@ async def test_non_lane_model_takes_default_path(monkeypatch: pytest.MonkeyPatch
     assert result is recorder.last_stream
     # The lane was never constructed (SC-7: default path unchanged).
     assert _ClaudeCliStreamRecorder.constructed == []
+
+
+# --- #24: lifecycle-tool detection for the stall diagnostic -------------------
+
+
+def test_is_lifecycle_tool_matches_mcp_names() -> None:
+    assert lane_dispatch._is_lifecycle_tool("mcp__strix__finish_scan")
+    assert lane_dispatch._is_lifecycle_tool("mcp__strix__agent_finish")
+    assert lane_dispatch._is_lifecycle_tool("mcp__strix__wait_for_agents")
+    assert lane_dispatch._is_lifecycle_tool("mcp__strix__respond_to_user")
+    assert lane_dispatch._is_lifecycle_tool("finish_scan")
+    # Non-lifecycle tools are not matched.
+    assert not lane_dispatch._is_lifecycle_tool("mcp__strix__get_threat_model")
+    assert not lane_dispatch._is_lifecycle_tool("mcp__strix-sandbox__fs_read")
+    assert not lane_dispatch._is_lifecycle_tool("create_agent")
