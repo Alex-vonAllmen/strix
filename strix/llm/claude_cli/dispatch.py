@@ -413,23 +413,33 @@ class ClaudeCliStream:
         await client.connect()
         try:
             await client.query(prompt)
+            interrupted = False
             async for message in client.receive_response():
                 async for event in self._translate(sdk, message):
                     yield event
-                # The lane's tool_use_behavior (issue #9): Claude Code keeps running
-                # after a Strix lifecycle/parking tool succeeds, so — like the default
-                # lane's Runner — end the SDK run as soon as the tool has settled this
-                # agent (status left "running"), instead of letting it run to the CLI's
-                # max_turns.
-                if self._lifecycle_settled():
+                # The ResultMessage is the last message of a turn and carries the
+                # cumulative usage + final_output (recorded in _translate). Stop on
+                # it — whether the turn ended naturally, on max_turns, or via the
+                # interrupt below. This is the ONLY exit, so usage/final_output are
+                # never lost (#28).
+                if isinstance(message, sdk.ResultMessage):
+                    break
+                # The lane's tool_use_behavior (issue #9): after a terminal lifecycle
+                # tool (finish_scan/agent_finish) Claude Code would otherwise run on
+                # to the CLI's max_turns. Interrupt to stop it — but do NOT break
+                # here: keep draining until the ResultMessage the interrupt produces
+                # (terminal_reason=aborted_streaming), so its usage is recorded
+                # instead of thrown away (#28). Interrupt once.
+                if not interrupted and self._lifecycle_settled():
+                    interrupted = True
                     logger.info(
-                        "[#24-diag] lane cycle BREAK on settled status=%s agent=%s",
+                        "[#24-diag] lane settled status=%s agent=%s; interrupting, "
+                        "draining to ResultMessage",
                         self._cycle_end_status(),
                         self._context.get("agent_id"),
                     )
                     with contextlib.suppress(Exception):
                         await client.interrupt()
-                    break
         finally:
             # Deterministic teardown: never leave an orphaned `claude` subprocess.
             try:
