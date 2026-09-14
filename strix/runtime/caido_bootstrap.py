@@ -75,7 +75,36 @@ async def _login_as_guest(
         logger.debug("loginAsGuest attempt %d/%d failed: %s", i, attempts, last_err)
         await asyncio.sleep(min(2.0 * i, 8.0))
 
-    raise RuntimeError(f"loginAsGuest failed after {attempts} attempts: {last_err}")
+    diagnostics = await _caido_failure_diagnostics(session)
+    raise RuntimeError(f"loginAsGuest failed after {attempts} attempts: {last_err}\n{diagnostics}")
+
+
+async def _caido_failure_diagnostics(session: BaseSandboxSession) -> str:
+    """Best-effort container-side context for a login failure (#17).
+
+    A bare "connection refused" says nothing about *why* Caido was unreachable —
+    it starts fine in isolation, so a failure here is almost always a runtime
+    death (e.g. the process reaped under memory pressure). Surface whether the
+    ``caido-cli`` process is still alive and the tail of its startup log so the
+    failure is diagnosable instead of opaque. Never raises: diagnostics must not
+    mask the original error.
+    """
+    try:
+        result = await session.exec(
+            "sh",
+            "-c",
+            "echo '--- caido process ---'; "
+            "(pgrep -a caido-cli || echo 'no caido-cli process running'); "
+            "echo '--- /tmp/caido_startup.log (tail) ---'; "
+            "(tail -n 40 /tmp/caido_startup.log 2>/dev/null || echo '(no startup log)')",
+            timeout=10,
+        )
+    except Exception as exc:  # noqa: BLE001 - diagnostics are best-effort, never fatal
+        return f"(could not collect Caido diagnostics: {type(exc).__name__}: {exc})"
+
+    raw = result.stdout
+    text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+    return text.strip() or "(no Caido diagnostics output)"
 
 
 async def bootstrap_caido(
