@@ -76,9 +76,15 @@ class _FakeClient:
 
 
 class _Result:
-    """Stands in for ``sdk.ResultMessage`` — carries cumulative usage + result."""
+    """Stands in for ``sdk.ResultMessage`` — carries cumulative usage + result.
 
-    is_error = False
+    Modelled on the real message the settle-interrupt produces: is_error=True with
+    terminal_reason="aborted_streaming" (#28/#32). The earlier is_error=False version
+    was unrealistic and let the crash-on-own-interrupt bug ship — the lane must drain
+    this errored result without raising.
+    """
+
+    is_error = True
     subtype = "success"
     terminal_reason = "aborted_streaming"
     num_turns = 5

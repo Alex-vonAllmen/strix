@@ -34,7 +34,13 @@ async def _drive(stream: ClaudeCliStream, message: Any) -> list[Any]:
     return [event async for event in stream._translate(sdk, message)]
 
 
-def _result(*, is_error: bool, result: str | None, subtype: str = "success") -> sdk.ResultMessage:
+def _result(
+    *,
+    is_error: bool,
+    result: str | None,
+    subtype: str = "success",
+    terminal_reason: str | None = None,
+) -> sdk.ResultMessage:
     # subtype "success" even on error — the reliable flag is is_error (issue #5); a
     # benign turn-limit uses subtype "error_max_turns" (issue #9).
     return sdk.ResultMessage(
@@ -46,6 +52,7 @@ def _result(*, is_error: bool, result: str | None, subtype: str = "success") -> 
         session_id="s1",
         result=result,
         usage={"input_tokens": 1, "output_tokens": 1},
+        terminal_reason=terminal_reason,
     )
 
 
@@ -142,4 +149,35 @@ async def test_fatal_error_still_raises_after_narrowing() -> None:
         await _drive(
             stream,
             _result(is_error=True, result="model error", subtype="success"),
+        )
+
+
+# -- #32: our own settle-interrupt result is not a crash --------------------------
+
+
+async def test_settle_interrupt_aborted_result_does_not_raise() -> None:
+    """The ResultMessage our drain-interrupt produces (#28) must not raise (#32).
+
+    A settled agent that we interrupt to drain its usage comes back is_error=True with
+    terminal_reason="aborted_streaming". That is our own doing — it must end the cycle
+    normally and record usage, not be mistaken for a fatal CLI error and crash the
+    agent (the regression that turned every clean finish into "marking crashed").
+    """
+    stream = _make_stream(model="claude-cli/claude-opus-4-8")
+    stream._settle_interrupted = True  # the drain interrupted this settled agent
+    events = await _drive(
+        stream,
+        _result(is_error=True, result="done", terminal_reason="aborted_streaming"),
+    )
+    assert events == []  # no ClaudeCliLaneError
+    assert stream.final_output == "done"  # usage/final_output still recorded
+
+
+async def test_aborted_result_without_settle_interrupt_still_raises() -> None:
+    """The bypass is scoped: an aborted result we did NOT trigger still fails fast."""
+    stream = _make_stream()  # _settle_interrupted stays False
+    with pytest.raises(ClaudeCliLaneError):
+        await _drive(
+            stream,
+            _result(is_error=True, result="aborted", terminal_reason="aborted_streaming"),
         )
