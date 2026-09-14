@@ -409,6 +409,11 @@ class ClaudeCliStream:
                 # agent (status left "running"), instead of letting it run to the CLI's
                 # max_turns.
                 if self._lifecycle_settled():
+                    logger.info(
+                        "[#24-diag] lane cycle BREAK on settled status=%s agent=%s",
+                        self._cycle_end_status(),
+                        self._context.get("agent_id"),
+                    )
                     with contextlib.suppress(Exception):
                         await client.interrupt()
                     break
