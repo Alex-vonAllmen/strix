@@ -117,6 +117,44 @@ async def _shell_exec(session: Any, root: str, args: dict[str, Any]) -> dict[str
     return _text_result(_bound("\n".join(parts)))
 
 
+async def _workspace_subdir_hint(session: Any, resolved: str, root: str) -> str:
+    """A correction hint for a not-found read under the workspace root (#22).
+
+    Each target is mounted under its OWN subdir of ``root`` (e.g.
+    ``/workspace/<repo>``), so agents that read ``/workspace/<repo-relative>``
+    miss. On a not-found under ``root`` whose first segment is not a real subdir,
+    name the actual subdir(s) and — for a single target — suggest the corrected
+    path. Best-effort: returns ``""`` on anything unexpected, never raises.
+    """
+    root_norm = posixpath.normpath(root)
+    if resolved != root_norm and not resolved.startswith(root_norm + "/"):
+        return ""
+    rel = resolved[len(root_norm) + 1 :]
+    first = rel.split("/", 1)[0] if rel else ""
+    try:
+        entries = await session.ls(root_norm)
+    except Exception:  # noqa: BLE001 - hint is best-effort; never mask the real error.
+        return ""
+    subdirs = sorted(
+        name
+        for e in entries
+        if bool(getattr(e, "kind", None)) and e.is_dir()
+        for name in [posixpath.basename(str(getattr(e, "path", "")).rstrip("/"))]
+        if name
+    )
+    if not subdirs or first in subdirs:
+        # No subdirs to point at, or the path is already under a real one
+        # (the file simply doesn't exist) — nothing useful to add.
+        return ""
+    hint = (
+        f"\nHint: each target's source is mounted under its own subdirectory of "
+        f"{root_norm} (present: {', '.join(subdirs)}); files are not at {root_norm} root."
+    )
+    if len(subdirs) == 1 and rel:
+        hint += f" Try {root_norm}/{subdirs[0]}/{rel}."
+    return hint
+
+
 async def _fs_read(session: Any, root: str, args: dict[str, Any]) -> dict[str, Any]:
     try:
         resolved = _resolve_in_sandbox(str(args.get("path", "")), root)
@@ -132,7 +170,8 @@ async def _fs_read(session: Any, root: str, args: dict[str, Any]) -> dict[str, A
         raw = stream.read(max_bytes) if hasattr(stream, "read") else bytes(stream)
     except Exception as exc:  # noqa: BLE001 - error-as-result.
         logger.debug("fs_read failed", exc_info=True)
-        return _text_result(f"fs_read failed for {resolved!r}: {exc}", is_error=True)
+        hint = await _workspace_subdir_hint(session, resolved, root)
+        return _text_result(f"fs_read failed for {resolved!r}: {exc}{hint}", is_error=True)
     return _text_result(_bound(_decode(raw)))
 
 

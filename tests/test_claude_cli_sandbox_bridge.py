@@ -177,3 +177,53 @@ def test_build_sandbox_bridge_returns_server_config() -> None:
     # McpSdkServerConfig is a TypedDict: type "sdk", name "strix-sandbox".
     assert config["type"] == "sdk"
     assert config["name"] == "strix-sandbox"
+
+
+# --- #22: fs_read not-found hints the correct /workspace subdir ---------------
+
+
+class _NotFoundSession:
+    """read() always fails; ls() returns a configurable set of /workspace dirs."""
+
+    def __init__(self, subdirs: list[str]) -> None:
+        self._subdirs = subdirs
+
+    async def read(self, path: PurePosixPath, *, user: Any = None) -> io.BytesIO:
+        raise FileNotFoundError(f"no such file: {path}")
+
+    async def ls(self, path: str, *, user: Any = None) -> list[_Entry]:
+        return [_Entry(f"/workspace/{d}", is_dir=True) for d in self._subdirs]
+
+
+async def test_fs_read_not_found_hints_single_subdir() -> None:
+    session = _NotFoundSession(["bench-2ea29ee0"])
+    result = await partial(sandbox_bridge._fs_read, session, "/workspace")(
+        {"path": "/workspace/apps/web/src/app/actions/onboarding.ts"}
+    )
+    text = result["content"][0]["text"]
+    assert result["is_error"] is True
+    assert "present: bench-2ea29ee0" in text
+    # Single target → suggest the corrected path.
+    assert "Try /workspace/bench-2ea29ee0/apps/web/src/app/actions/onboarding.ts." in text
+
+
+async def test_fs_read_not_found_lists_multiple_subdirs() -> None:
+    session = _NotFoundSession(["repo-a", "repo-b"])
+    result = await partial(sandbox_bridge._fs_read, session, "/workspace")(
+        {"path": "/workspace/apps/x.ts"}
+    )
+    text = result["content"][0]["text"]
+    assert "present: repo-a, repo-b" in text
+    # Ambiguous target → list, but no single-path "Try ..." suggestion.
+    assert "Try /workspace/" not in text
+
+
+async def test_fs_read_no_hint_when_already_under_real_subdir() -> None:
+    session = _NotFoundSession(["bench-2ea29ee0"])
+    result = await partial(sandbox_bridge._fs_read, session, "/workspace")(
+        {"path": "/workspace/bench-2ea29ee0/does-not-exist.ts"}
+    )
+    text = result["content"][0]["text"]
+    assert result["is_error"] is True
+    # The path is already under a real subdir; the file just doesn't exist.
+    assert "Hint:" not in text
