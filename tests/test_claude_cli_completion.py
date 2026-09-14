@@ -1,7 +1,9 @@
 """claude-cli/ lane completion semantics (issue #9, M2).
 
-- The lane ends the SDK run when a lifecycle/parking tool settles the agent (the lane's
-  tool_use_behavior), instead of running to the CLI's max_turns.
+- The lane ends the SDK run when a *terminal* lifecycle tool settles the agent (the
+  lane's tool_use_behavior), instead of running to the CLI's max_turns. A blocking
+  parking tool (``wait_for_agents``) parks the agent ``waiting`` but the cycle stays
+  alive to resume it (#24).
 - Empty-input cycles re-feed the session transcript so a fresh SDK client keeps its task
   (no bare "Continue.").
 """
@@ -38,8 +40,8 @@ def test_lifecycle_settled_reads_coordinator_status() -> None:
     assert stream._lifecycle_settled() is False
     coord.statuses["root"] = "completed"
     assert stream._lifecycle_settled() is True
-    coord.statuses["root"] = "waiting"  # parking tool
-    assert stream._lifecycle_settled() is True
+    coord.statuses["root"] = "waiting"  # blocking parking tool — cycle must stay alive (#24)
+    assert stream._lifecycle_settled() is False
 
 
 def test_lifecycle_settled_false_without_coordinator() -> None:

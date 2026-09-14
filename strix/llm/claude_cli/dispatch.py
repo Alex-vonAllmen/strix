@@ -122,6 +122,11 @@ _SEED_MAX_CHARS = 12_000
 _BENIGN_TERMINAL_REASONS = frozenset({"max_turns"})
 _BENIGN_RESULT_SUBTYPES = frozenset({"error_max_turns"})
 
+# Coordinator statuses that mean the agent is DONE and its SDK cycle should end
+# (finish_scan/agent_finish). Deliberately excludes "waiting"/"budget_paused",
+# which are transient: a blocking parking tool resumes the same cycle (#24).
+_TERMINAL_STATUSES = frozenset({"completed", "stopped", "crashed", "failed"})
+
 
 def _is_benign_result(message: Any) -> bool:
     """Whether an errored ``ResultMessage`` is a normal turn-limit end, not a fatal error."""
@@ -274,19 +279,27 @@ class ClaudeCliStream:
         return list(self._transcript)
 
     def _lifecycle_settled(self) -> bool:
-        """Whether a lifecycle/parking tool has moved this agent out of ``running``.
+        """Whether a *terminal* lifecycle tool has ended this agent.
 
-        Mirrors ``run_agent_loop``'s own "status != running" check: a lifecycle tool
-        (``finish_scan``/``agent_finish``) settles the agent terminal and a parking tool
-        (``respond_to_user``/``wait_for_agents``) sets it ``waiting`` — either way the
-        agent has yielded control and this SDK run should end (issue #9).
+        Ends the SDK cycle only for a terminal status — ``finish_scan`` /
+        ``agent_finish`` (``completed``/``stopped``/``crashed``/``failed``).
+
+        NOT ``waiting`` (#24): ``wait_for_agents`` is a *blocking* tool — it parks
+        the agent (status ``waiting``), ``await``s ``wait_for_message`` inside the
+        MCP call, then ``mark_running``s on wake and returns, so the SDK cycle
+        must stay alive to resume it. Issue #9 originally ended the cycle on any
+        non-``running`` status; that interrupted the blocking wait mid-flight,
+        ``run_agent_loop`` returned on ``waiting``, and the root was abandoned
+        with its children torn down. The default lane blocks-and-resumes
+        ``wait_for_agents`` within one ``Runner`` run; matching that means
+        leaving the parked cycle running until the tool itself resumes it.
         """
         coordinator = self._context.get("coordinator")
         agent_id = self._context.get("agent_id")
         if coordinator is None or not isinstance(agent_id, str):
             return False
         status = getattr(coordinator, "statuses", {}).get(agent_id)
-        return status is not None and status != "running"
+        return status in _TERMINAL_STATUSES
 
     def _cycle_end_status(self) -> str:
         """The agent's coordinator status, for the #24 stall diagnostic."""

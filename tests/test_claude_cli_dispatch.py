@@ -8,6 +8,7 @@ regression).
 
 from __future__ import annotations
 
+import types
 from typing import Any, ClassVar
 
 import pytest
@@ -117,3 +118,29 @@ def test_is_lifecycle_tool_matches_mcp_names() -> None:
     assert not lane_dispatch._is_lifecycle_tool("mcp__strix__get_threat_model")
     assert not lane_dispatch._is_lifecycle_tool("mcp__strix-sandbox__fs_read")
     assert not lane_dispatch._is_lifecycle_tool("create_agent")
+
+
+# --- #24 fix: the lane ends a cycle only on a TERMINAL status, not `waiting` ---
+
+
+def _stream_with_status(status: str) -> Any:
+    coord = types.SimpleNamespace(statuses={"a": status})
+    return lane_dispatch.ClaudeCliStream(
+        object(),
+        input=None,
+        run_config=types.SimpleNamespace(model="claude-cli/claude-opus-4-8"),
+        context={"coordinator": coord, "agent_id": "a"},
+        max_turns=1,
+        session=None,
+        hooks=None,
+    )
+
+
+def test_lifecycle_settled_only_on_terminal_status() -> None:
+    # Terminal (finish_scan/agent_finish) → end the SDK cycle.
+    for terminal in ("completed", "stopped", "crashed", "failed"):
+        assert _stream_with_status(terminal)._lifecycle_settled() is True
+    # Transient — a blocking wait_for_agents must be allowed to resume in place;
+    # ending the cycle here is the #24 stall.
+    for transient in ("running", "waiting", "budget_paused"):
+        assert _stream_with_status(transient)._lifecycle_settled() is False
