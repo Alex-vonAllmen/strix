@@ -126,6 +126,26 @@ def _note_exit_reason(reason: str) -> None:
         report_state.scan_ended_exit_reason = reason
 
 
+def _scan_reported_complete() -> bool:
+    """Did ``finish_scan`` persist a completed scan for this run?
+
+    ``result.final_output`` is not a reliable completion signal across lanes: the
+    claude-cli lane leaves it ``None`` even on a clean finish (#29), so a check
+    keyed on it mistakes a success for a text-only end. The global report state is
+    the source of truth — ``finish_scan`` sets ``scan_results['scan_completed']``
+    and marks the run record ``completed`` via ``update_scan_final_fields``, and a
+    fresh/resumed run clears ``scan_results`` first, so a run that never finishes
+    still reports ``False`` here.
+    """
+    report_state = get_global_report_state()
+    if report_state is None:
+        return False
+    results = report_state.scan_results
+    if isinstance(results, dict) and results.get("scan_completed"):
+        return True
+    return report_state.run_record.get("status") == "completed"
+
+
 def _persist_mcp_status(roster: list[dict[str, Any]]) -> None:
     """Write the run's non-secret MCP connection status roster to run.json.
 
@@ -611,14 +631,18 @@ async def run_strix_scan(
         )
         if not interactive and result is not None:
             final = getattr(result, "final_output", None)
-            scan_completed = False
-            if isinstance(final, str):
+            # Authoritative first: the persisted report state. Only if finish_scan
+            # left nothing there do we fall back to parsing final_output, so lanes
+            # that populate it keep working and the claude-cli lane (final_output
+            # None on a clean finish, #29) is no longer mistaken for a failure.
+            scan_completed = _scan_reported_complete()
+            if not scan_completed and isinstance(final, str):
                 try:
                     parsed = json.loads(final)
                     scan_completed = bool(isinstance(parsed, dict) and parsed.get("scan_completed"))
                 except (ValueError, TypeError):
                     scan_completed = False
-            elif isinstance(final, dict):
+            elif not scan_completed and isinstance(final, dict):
                 scan_completed = bool(final.get("scan_completed"))
             if not scan_completed:
                 logger.error(
