@@ -291,6 +291,66 @@ def test_make_model_settings_skips_required_tool_choice_for_non_openai_models() 
     assert settings.tool_choice is None
 
 
+@pytest.mark.parametrize(
+    "model_name",
+    [
+        "google/gemini-3.8-flash",
+        "openrouter/google/gemini-3.8-flash",
+        "gemini/gemini-3.7-flash",
+    ],
+)
+def test_make_model_settings_forces_required_tool_choice_for_gemini_models(
+    model_name: str,
+) -> None:
+    """Gemini honours `required`, so the setting must not be silently dropped.
+
+    Verified against the provider: with `required` the model emitted a tool call
+    even from a prompt asking for none; with `auto` it produced text and no call.
+    A scan whose agents end turns without a tool call records no coverage and
+    still finishes clean, so this flag is the lever that makes such a run usable.
+    """
+    settings = make_model_settings(
+        "none",
+        model_name=model_name,
+        force_required_tool_choice=True,
+    )
+
+    assert settings.tool_choice == "required"
+
+
+def test_make_model_settings_forces_required_for_openrouter_routed_openai_model() -> None:
+    """`openrouter/` is a router prefix, not a provider.
+
+    Before the routing-prefix list included it, an OpenAI model reached through
+    OpenRouter read as an unknown provider and the operator's setting was
+    dropped without a word.
+    """
+    settings = make_model_settings(
+        None,
+        model_name="openrouter/openai/gpt-4o",
+        force_required_tool_choice=True,
+    )
+
+    assert settings.tool_choice == "required"
+
+
+@pytest.mark.parametrize(
+    "model_name",
+    ["openrouter/z-ai/glm-5.3", "openrouter/anthropic/claude-opus-4.8"],
+)
+def test_make_model_settings_skips_required_tool_choice_for_routed_unknown_providers(
+    model_name: str,
+) -> None:
+    """Stripping the router must not widen the gate to every routed model."""
+    settings = make_model_settings(
+        "none",
+        model_name=model_name,
+        force_required_tool_choice=True,
+    )
+
+    assert settings.tool_choice is None
+
+
 def test_make_model_settings_forces_required_for_routed_openai_model() -> None:
     settings = make_model_settings(
         None,
