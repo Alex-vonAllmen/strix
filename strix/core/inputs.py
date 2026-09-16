@@ -27,13 +27,26 @@ if TYPE_CHECKING:
     from strix.config.settings import ReasoningEffort
 
 
+# Routers that prefix a provider-qualified model id. Stripped so the check below
+# sees the provider rather than the router: `openrouter/google/gemini-3.8-flash`
+# is a Gemini model, and reading it as an unknown provider silently disables a
+# setting the operator asked for.
+_ROUTING_PREFIXES = ("litellm/", "any-llm/", "openrouter/")
+
+# Providers that honour `tool_choice: "required"`. Gemini maps it onto its own
+# function-calling mode; verified against `google/gemini-3.8-flash` through
+# OpenRouter, where `required` produced a tool call even from a prompt that
+# explicitly asked for none, and `auto` produced text and no call.
+_REQUIRED_TOOL_CHOICE_PREFIXES = ("openai/", "google/", "gemini/")
+
+
 def _accepts_required_tool_choice(model_name: str | None) -> bool:
     name = (model_name or "").strip().lower()
-    for prefix in ("litellm/", "any-llm/"):
+    for prefix in _ROUTING_PREFIXES:
         if name.startswith(prefix):
             name = name[len(prefix) :]
             break
-    return name.startswith("openai/") or is_known_openai_bare_model(name)
+    return name.startswith(_REQUIRED_TOOL_CHOICE_PREFIXES) or is_known_openai_bare_model(name)
 
 
 def _render_diff_scope(diff_scope: dict[str, Any]) -> list[str]:
